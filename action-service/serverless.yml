@@ -5,6 +5,7 @@ plugins:
   - serverless-bundle
   - serverless-pseudo-parameters
 
+#export MAIL_QUE_URL from imported CF stack
 provider:
   name: aws
   runtime: nodejs12.x
@@ -13,8 +14,12 @@ provider:
   region: eu-west-1
   environment:
     AUCTIONS_TABLE_NAME: ${self:custom.AuctionsTable.name}
+    MAIL_QUEUE_URL: ${self:custom.MailQueue.url}
+    AUCITONS_BUCKET_NAME: ${self:custom.AuctionsBucket.name}
   iamRoleStatements:
     - ${file(../iam/AuctionsTableIAM.yml):AuctionsTableIAM}
+    - ${file(../iam/MailQueueIAM.yml):MailQueueIAM}
+    - ${file(../iam/AuctionsBucketIAM.yml):AuctionsBucketIAM}
     # - Effect: Allow
     #   Action:
     #     - dynamodb:PutItem
@@ -23,6 +28,8 @@ provider:
 resources:
   Resources:
     AuctionsTable: ${file(../resources/AuctionsTable.yml):AuctionsTable}
+    AuctionsBucket: ${file(../resources/AuctionsBucket.yml):AuctionsBucket}
+    AuctionsBucketPolicy: ${file(../resources/AuctionsBucket.yml):AuctionsBucketPolicy}
     # AuctionsTable:
     #   Type: AWS::DynamoDB::Table
     #   Properties:
@@ -40,11 +47,65 @@ functions:
     events:
       - http:
           method: POST
-          path: /createAuction
+          path: /auction
+          cors: true
+          authorizer: ${self:custom.authorizer}
+ 
+  getAuctions:
+    handler: src/handlers/getAuctions.handler
+    events:
+      - http:
+          method: GET
+          path: /auctions
+          cors: true
+          authorizer: ${self:custom.authorizer}
 
+  getAuction:
+    handler: src/handlers/getAuction.handler
+    events:
+      - http:
+          method: GET
+          path: /auction/{id}
+          cors: true
+          authorizer: ${self:custom.authorizer}
+
+  placeBid:
+    handler: src/handlers/placeBid.handler
+    events:
+      - http:
+          method: PATCH
+          path: /auction/{id}/bid
+          cors: true
+          authorizer: ${self:custom.authorizer}
+
+  uploadAuctionPicture:
+    handler: src/handlers/uploadAuctionPicture.handler
+    events:
+      - http:
+          method: PATCH
+          path: /auction/{id}/picture
+          cors: true
+          authorizer: ${self:custom.authorizer}
+
+  processAuctions:
+    handler: src/handlers/processAuctions.handler
+    events:
+      - schedule: rate(10 minutes)
+
+#export MAIL_QUE_URL from imported CF stack
 custom:
+  authorizer: arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:auth-service-${self:provider.stage}-auth
   AuctionsTable:
     name: !Ref AuctionsTable
     arn: !GetAtt AuctionsTable.Arn
+  MailQueue:
+    arn: ${cf:notification-service-${self:provider.stage}.MailQueueArn}
+    url: ${cf:notification-service-${self:provider.stage}.MailQueueUrl}
+  AuctionsBucket:
+    name: auctions-bucket-erjzxc${self:provider.stage}
   bundle:
     linting: false
+
+# sls create --name YOUR_PROJECT_NAME --template-url https://github.com/codingly-io/sls-base
+# sls create --name auth-service --template-url https://github.com/codingly-io/serverless-auth0-authorize
+# sls create --name YOUR_PROJECT_NAME --template-url https://github.com/codingly-io/sls-base
